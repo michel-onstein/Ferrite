@@ -25,6 +25,10 @@ use std::time::{Duration, Instant};
 
 use eframe::egui;
 
+// Only the test-only `RunStatus::glyph` helper needs the status icons.
+#[cfg(test)]
+use crate::ui::phosphor_icons::{CHECK, X};
+
 /// [`crate::markdown::MarkdownEditor`] stores the current snapshot at this id for
 /// [`crate::markdown::widgets::EditableCodeBlock`].
 pub(crate) fn code_execution_ctx_id() -> egui::Id {
@@ -676,6 +680,9 @@ mod tests {
     fn cancelled_status_is_terminal() {
         let cancelled = RunStatus::Cancelled;
         assert!(!cancelled.is_running());
-        assert!(!matches!(cancelled, RunStatus::Completed { exit_code: Some(0) }));
+        assert!(!matches!(
+            cancelled,
+            RunStatus::Completed { exit_code: Some(0) }
+        ));
     }
 }
