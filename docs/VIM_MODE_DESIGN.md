@@ -1,9 +1,22 @@
 # Vim Mode — Design for Fuller Keybindings and an Ex Command Subset
 
-**Status:** Proposed (no code written)
-**Supersedes:** nothing. Describes a restructuring of `src/editor/ferrite/vim.rs`.
-**As-built reference:** [`docs/technical/editor/vim-mode.md`](technical/editor/vim-mode.md) — what ships today.
+**Status:** **Implemented** — phases 0–4 shipped; phase 5 (Visual Block, macros) not started.
+`src/editor/ferrite/vim.rs` is replaced by `src/editor/ferrite/vim/`.
+**As-built reference:** [`docs/technical/editor/vim-mode.md`](technical/editor/vim-mode.md) — the shipped keymap.
 **Binding constraints:** [`docs/technical/editor/architecture.md`](technical/editor/architecture.md) — complexity tiers, no per-frame O(N).
+
+> **Where the implementation departed from this design.** Three things changed once the code
+> met the codebase, and they are corrected in place below rather than left as a trap for the
+> next reader:
+>
+> 1. **§2.5** proposed putting `EditHistory`, search state and the clipboard inside `VimCtx`.
+>    None of the three belong to the editor, so all became effects instead.
+> 2. **§1.3** claimed Vim edits were invisible to the undo history. They are not — the
+>    widget's per-frame snapshot diff already captured them, so `dd` + Ctrl+Z worked before
+>    this change. Only the Vim *keys* for undo were missing.
+> 3. **§3.1** listed `Ctrl+D/U/F/B` as page motions. Ferrite already binds Ctrl+D to Delete
+>    Line, Ctrl+F to Find and Ctrl+B to Bold, so those are left to the application and paging
+>    stays on PageUp/PageDown.
 
 ## The question this answers
 
@@ -87,11 +100,15 @@ after the operator, and a pending-state machine that can hold "operator + partia
 
 ### 1.3 Structural gaps that follow from the above
 
-- **Undo is impossible to wire.** `handle_key()` receives `&mut TextBuffer`,
-  `&mut Selection`, `&mut ViewState` — but not `EditHistory`. So `u` and `Ctrl+R` cannot be
-  implemented at all; `Key::U` is currently swallowed with a `// TODO: wire to undo`. Worse,
-  edits performed by vim go straight to the buffer, so they are **invisible to the undo
-  history** the rest of the editor maintains. That is a correctness bug, not just a gap.
+- **`u` and `Ctrl+R` cannot be implemented.** `handle_key()` receives `&mut TextBuffer`,
+  `&mut Selection`, `&mut ViewState` — but no history, so `Key::U` is swallowed with a
+  `// TODO: wire to undo`. The editor has no `EditHistory` of its own to hand it: undo lives
+  on `Tab` in `state.rs`, driven by `compute_edit_ops` diffing the tab's content string.
+  Vim's edits *are* captured by that path — `EditorWidget::show()` snapshots content at frame
+  start and calls `record_external_edit_from_snapshot()` whenever the editor's dirty flag is
+  set — so `dd` followed by Ctrl+Z does work today. The gap is that the Vim keys for it do
+  not, which means `u`/`Ctrl+R` have to be routed to the application rather than handled in
+  the editor.
 - **One register, and it is not vim's.** `yank_register: String` plus a `yank_linewise`
   flag. No named registers `"a`–`"z`, no append `"A`, no yank register `"0`, no
   small-delete `"-`, no blackhole `"_`, and no connection to the system clipboard (`"+`).
@@ -288,11 +305,17 @@ pub struct VimCtx<'a> {
     pub selections: &'a mut Vec<Selection>,
     pub primary: usize,
     pub view: &'a mut ViewState,
-    pub history: &'a mut EditHistory,   // ← unlocks u / Ctrl-R, keeps vim edits undoable
-    pub search: &'a mut SearchState,    // ← unlocks / ? n N * #
-    pub clipboard: &'a mut dyn ClipboardAccess,  // ← unlocks "+ and "*
+    /// Lines in the viewport, for H/M/L and the page motions.
+    pub visible_lines: usize,
 }
 ```
+
+**As implemented, `history`, `search` and `clipboard` are *not* fields here.** All three live
+above the editor: undo on `Tab`, the match list in the find panel, the clipboard in egui. An
+earlier draft of this section had the editor borrow them, which would have inverted the
+dependency the crate extraction (§2.6) depends on. They are reached the same way `:w` is —
+as a `VimEffect` the application carries out. `u`, `Ctrl+R`, `/`, `n`, `*` and `"+y` are
+therefore effects, not editor operations.
 
 A borrowed struct, not a trait object, keeps this allocation-free and monomorphic — no
 per-frame cost. **`history` is the load-bearing addition**: every vim change must go through
@@ -343,7 +366,7 @@ Grouped by phase (§6). "Have" marks what works today.
 | `(` `)` | Sentence back / forward | Exclusive | New |
 | `%` | Matching bracket | Inclusive | New — reuse `editor/matching.rs` |
 | `H` `M` `L` | Screen top / middle / bottom | Linewise | New — uses `ViewState` |
-| `Ctrl+D` `Ctrl+U` `Ctrl+F` `Ctrl+B` | Half-page / page scroll | Linewise | New |
+| `PageUp` / `PageDown` | Page scroll | Linewise | **Shipped.** Vim's `Ctrl+D/U/F/B` are *not* bound: Ferrite uses Ctrl+D for Delete Line, Ctrl+F for Find, Ctrl+B for Bold |
 | `` `{mark} `` `'{mark}` | Jump to mark | Excl / Linewise | New (phase 4) |
 | `n` `N` `*` `#` | Search motions | Exclusive | New (phase 3) |
 
@@ -481,12 +504,12 @@ regress the current keymap.
 
 | Phase | Content | User-visible | Test focus |
 |---|---|---|---|
-| **0** | Stroke normalisation, parser skeleton, `VimCtx`, undo grouping, grapheme-safe motions. Re-express the *existing* keymap through the new pipeline. | **Nothing** — parity refactor | Every existing vim test still passes, unchanged |
-| **1** | Full motion set (§3.1 minus search/marks), all operator × motion pairs, text objects, `>` `<` `~` `gu` `gU` `J` `r` | Big keymap jump | Table-driven motion/operator matrix |
-| **2** | Registers, `.` repeat, `u` / `Ctrl+R` | Undo works in vim mode | Undo grouping; register semantics |
-| **3** | `/` `?` `n` `N` `*` `#`, shared with find/replace | Search | Pattern + `smartcase`; shared highlight state |
-| **4** | `:` command line, §4 subset, marks, command history | Ex commands | Range parsing; `VimEffect` mapping |
-| **5** | Visual Block via multi-cursor, macros `q`/`@`, `gv` | Power features | Stroke recording/replay |
+| **0** ✅ | Stroke normalisation, parser skeleton, `VimCtx`, undo grouping, grapheme-safe motions. Re-express the *existing* keymap through the new pipeline. | **Nothing** — parity refactor | Every existing vim test still passes, unchanged |
+| **1** ✅ | Full motion set (§3.1 minus search/marks), all operator × motion pairs, text objects, `>` `<` `~` `gu` `gU` `J` `r` | Big keymap jump | Table-driven motion/operator matrix |
+| **2** ✅ | Registers, `.` repeat, `u` / `Ctrl+R` | Undo works in vim mode | Undo grouping; register semantics |
+| **3** ✅ | `/` `?` `n` `N` `*` `#`, shared with find/replace | Search | Pattern + `smartcase`; shared highlight state |
+| **4** ✅ (no marks, no command history) | `:` command line, §4 subset, marks, command history | Ex commands | Range parsing; `VimEffect` mapping |
+| **5** ❌ not started | Visual Block via multi-cursor, macros `q`/`@`, `gv` | Power features | Stroke recording/replay |
 
 Phase 0 is the one that must not be skipped, and the one with no demo value — which is
 exactly why it should be stated as a deliverable with its own PR. Phases 1–5 are
