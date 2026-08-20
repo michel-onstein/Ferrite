@@ -2428,74 +2428,85 @@ impl FerriteEditor {
                 }
 
                 // ── Vim mode interception ─────────────────────────────────────
-                // When Vim mode is active, route key events through VimState first.
-                // In Normal/Visual mode most keys are consumed by Vim; in Insert
-                // mode, only Escape is consumed (everything else passes through).
+                // Both `Key` and `Text` events are routed through `VimState`,
+                // which normalises them into one keystroke stream. Printable
+                // characters arrive as text — that is what makes `$`, `%`, `~`
+                // and friends reachable at all, since `egui::Key` has no variant
+                // for them — so `Text` must no longer be discarded here.
+                //
+                // Anything the Vim grammar does not claim comes back as
+                // `Passthrough` and falls through to the standard handler below,
+                // which is what keeps the app's own shortcuts alive in Normal
+                // mode. See docs/VIM_MODE_DESIGN.md §2.1–2.2.
                 if self.vim_mode_enabled {
-                    // Vim intercepts Key events
-                    if let egui::Event::Key {
-                        key,
-                        pressed: true,
-                        modifiers,
-                        ..
-                    } = event
-                    {
-                        let idx = self
-                            .primary_selection_index
-                            .min(self.selections.len().saturating_sub(1));
-                        let mut sel = self
-                            .selections
-                            .get(idx)
-                            .copied()
-                            .unwrap_or_else(Selection::start);
+                    let idx = self
+                        .primary_selection_index
+                        .min(self.selections.len().saturating_sub(1));
+                    let visible_lines = InputHandler::visible_lines(&self.view);
 
-                        let vim_result = self.vim_state.handle_key(
-                            *key,
+                    let vim_result = match event {
+                        egui::Event::Key {
+                            key,
+                            pressed: true,
                             modifiers,
-                            &mut self.buffer,
-                            &mut sel,
-                            &mut self.view,
-                        );
-
-                        if let Some(s) = self.selections.get_mut(idx) {
-                            *s = sel;
+                            ..
+                        } => {
+                            let mut vim_ctx = super::vim::VimCtx {
+                                buffer: &mut self.buffer,
+                                selections: &mut self.selections,
+                                primary: idx,
+                                view: &mut self.view,
+                                visible_lines,
+                            };
+                            Some(self.vim_state.handle_key(*key, modifiers, &mut vim_ctx))
                         }
+                        egui::Event::Text(text) => {
+                            let mut vim_ctx = super::vim::VimCtx {
+                                buffer: &mut self.buffer,
+                                selections: &mut self.selections,
+                                primary: idx,
+                                view: &mut self.view,
+                                visible_lines,
+                            };
+                            Some(self.vim_state.handle_text(text, &mut vim_ctx))
+                        }
+                        _ => None,
+                    };
 
-                        match vim_result {
-                            super::vim::VimKeyResult::Handled(result) => {
-                                match result {
-                                    InputResult::TextChanged => {
-                                        let line = self.primary_selection().head.line;
-                                        self.mark_lines_dirty(line, line);
-                                        self.reset_cursor_blink();
-                                        self.view
-                                            .ensure_line_visible(line, self.buffer.line_count());
-                                    }
-                                    InputResult::CursorMoved => {
-                                        self.reset_cursor_blink();
-                                        self.view.ensure_line_visible(
-                                            self.primary_selection().head.line,
-                                            self.buffer.line_count(),
-                                        );
-                                    }
-                                    _ => {}
+                    match vim_result {
+                        Some(super::vim::VimKeyResult::Handled(result)) => {
+                            match result {
+                                InputResult::TextChanged => {
+                                    // A Vim edit can span many lines (`dd`, `3>>`,
+                                    // `:%s`), so invalidate the visible window
+                                    // rather than a single line. Cache keys are
+                                    // content-hash based, so unchanged lines still
+                                    // hit.
+                                    let total = self.buffer.line_count();
+                                    let (vis_start, vis_end) =
+                                        self.view.get_visible_line_range(total);
+                                    self.mark_lines_dirty(vis_start, vis_end);
+                                    self.reset_cursor_blink();
+                                    let line = self.primary_selection().head.line;
+                                    self.view.ensure_line_visible(line, total);
                                 }
-                                continue;
+                                InputResult::CursorMoved => {
+                                    self.reset_cursor_blink();
+                                    self.view.ensure_line_visible(
+                                        self.primary_selection().head.line,
+                                        self.buffer.line_count(),
+                                    );
+                                }
+                                _ => {}
                             }
-                            super::vim::VimKeyResult::Consumed => {
-                                continue;
-                            }
-                            super::vim::VimKeyResult::Passthrough => {
-                                // Fall through to normal handling below
-                            }
-                        }
-                    }
-
-                    // In Normal/Visual mode, suppress text insertion events
-                    if let egui::Event::Text(_) = event {
-                        if !self.vim_state.should_insert_text() {
                             continue;
                         }
+                        Some(super::vim::VimKeyResult::Consumed) => {
+                            continue;
+                        }
+                        // `Passthrough` and non-keyboard events fall through to
+                        // the standard handling below.
+                        Some(super::vim::VimKeyResult::Passthrough) | None => {}
                     }
                 }
 
@@ -3214,6 +3225,46 @@ impl FerriteEditor {
             Some(self.vim_state.mode)
         } else {
             None
+        }
+    }
+
+    /// Drains Vim commands that only the application can carry out — `u`, `:w`,
+    /// `:q`, `/pattern` and so on. Empty unless Vim mode is on.
+    ///
+    /// The editor deliberately does not know about save, quit or the tab's undo
+    /// history; it reports the intent and the app decides. See
+    /// docs/VIM_MODE_DESIGN.md §2.6.
+    pub fn take_vim_effects(&mut self) -> Vec<super::vim::VimEffect> {
+        if self.vim_mode_enabled {
+            self.vim_state.take_effects()
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// The partially typed Vim command (`d2` while typing `d2w`), for the
+    /// status bar.
+    pub fn vim_pending(&self) -> Option<String> {
+        if !self.vim_mode_enabled {
+            return None;
+        }
+        let pending = self.vim_state.pending_text();
+        (!pending.is_empty()).then_some(pending)
+    }
+
+    /// The open `:` / `/` command line, if any.
+    pub fn vim_cmdline(&self) -> Option<String> {
+        if self.vim_mode_enabled {
+            self.vim_state.cmdline_text()
+        } else {
+            None
+        }
+    }
+
+    /// Hands clipboard contents back to Vim so `"+p` can complete.
+    pub fn provide_vim_clipboard(&mut self, text: String) {
+        if self.vim_mode_enabled {
+            self.vim_state.provide_clipboard(text);
         }
     }
 
