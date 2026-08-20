@@ -19,6 +19,11 @@ mod widget;
 // Re-export Ferrite editor types
 pub use ferrite::{compute_edit_ops, EditHistory};
 
+// Vim types the application needs: `VimEffect` carries the commands the editor
+// cannot carry out itself (save, quit, undo, search).
+pub use ferrite::vim::ex::SetValue as VimSetValue;
+pub use ferrite::vim::{VimEffect, VimMode};
+
 // Re-export other editor types
 pub use find_replace::{FindReplacePanel, FindState};
 pub use line_numbers::count_lines;

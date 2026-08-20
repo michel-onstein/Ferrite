@@ -827,6 +827,8 @@ impl FerriteApp {
                             let mut format_bar_toggled = false;
                             let mut format_bar_action: Option<RibbonAction> = None;
                             let mut vim_label_for_status: Option<&'static str> = None;
+                            let mut vim_status_detail: Option<String> = None;
+                            let mut vim_effects: Vec<crate::editor::VimEffect> = Vec::new();
                             let mut content_changed_in_editor = false;
 
                             if let Some(tab) = self.state.active_tab_mut() {
@@ -931,6 +933,15 @@ impl FerriteApp {
                                 let editor_output = editor.show(&mut editor_ui);
 
                                 vim_label_for_status = editor_output.vim_mode_label;
+                                // Vim's `:` line takes over the indicator while
+                                // it is open, so the user can see what they type.
+                                vim_status_detail = editor_output
+                                    .vim_cmdline
+                                    .clone()
+                                    .or_else(|| editor_output.vim_pending.clone());
+                                if !editor_output.vim_effects.is_empty() {
+                                    vim_effects.extend(editor_output.vim_effects.clone());
+                                }
 
                                 // NOTE: Fold toggle is handled internally by FerriteEditor and synced
                                 // back to Tab in widget.rs. We just need to check if a fold was toggled
@@ -1094,6 +1105,14 @@ impl FerriteApp {
 
                             // Update Vim mode indicator (after tab borrow ends)
                             self.state.ui.vim_mode_indicator = vim_label_for_status;
+                            self.state.ui.vim_command_line = vim_status_detail;
+
+                            // Carry out `u`, `:w`, `:q`, `/…` and friends. Done
+                            // after the tab borrow ends because the handlers
+                            // need `&mut self`.
+                            if !vim_effects.is_empty() {
+                                self.apply_vim_effects(&ctx, vim_effects);
+                            }
 
                             // Recompute search matches when content changes while find panel is open.
                             // Byte positions in find_state.matches become stale after buffer edits.
@@ -1390,6 +1409,9 @@ impl FerriteApp {
                                 };
 
                                 let mut split_vim_label: Option<&'static str> = None;
+                                let mut split_vim_detail: Option<String> = None;
+                                let mut split_vim_effects: Vec<crate::editor::VimEffect> =
+                                    Vec::new();
                                 let mut split_content_changed = false;
 
                                 // Track scroll outputs from both panes
@@ -1537,6 +1559,11 @@ impl FerriteApp {
                                     let editor_output = editor.show(&mut left_ui);
 
                                     split_vim_label = editor_output.vim_mode_label;
+                                    split_vim_detail = editor_output
+                                        .vim_cmdline
+                                        .clone()
+                                        .or_else(|| editor_output.vim_pending.clone());
+                                    split_vim_effects.extend(editor_output.vim_effects.clone());
 
                                     // Capture scroll metrics for sync scrolling
                                     editor_scroll_offset = Some(editor_output.scroll_offset);
@@ -1582,6 +1609,10 @@ impl FerriteApp {
 
                                 // Update Vim mode indicator (after tab borrow ends)
                                 self.state.ui.vim_mode_indicator = split_vim_label;
+                                self.state.ui.vim_command_line = split_vim_detail;
+                                if !split_vim_effects.is_empty() {
+                                    self.apply_vim_effects(&ctx, split_vim_effects);
+                                }
 
 
                                 // ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ

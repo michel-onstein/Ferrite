@@ -3192,6 +3192,9 @@ pub struct UiState {
     pub go_to_line_dialog: Option<crate::ui::GoToLineDialog>,
     /// Current Vim mode label for status bar display (None = Vim disabled).
     pub vim_mode_indicator: Option<&'static str>,
+    /// Vim's open `:` / `/` command line, or a partially typed command such as
+    /// `d2`. Shown next to the mode indicator so pending state is visible.
+    pub vim_command_line: Option<String>,
     /// Whether the HTML export options dialog is open.
     pub show_html_export_dialog: bool,
     /// Whether the PDF export options dialog is open.

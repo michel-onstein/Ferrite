@@ -145,6 +145,12 @@ pub struct EditorOutput {
     pub content_height: f32,
     /// Current Vim mode label (None when Vim mode is disabled).
     pub vim_mode_label: Option<&'static str>,
+    /// Vim commands only the application can carry out (`u`, `:w`, `:q`, `/…`).
+    pub vim_effects: Vec<crate::editor::VimEffect>,
+    /// Partially typed Vim command, e.g. `d2` while typing `d2w`.
+    pub vim_pending: Option<String>,
+    /// The open `:` / `/` command line, including its prefix.
+    pub vim_cmdline: Option<String>,
 }
 
 /// Search match highlight information.
@@ -893,8 +899,12 @@ impl<'a> EditorWidget<'a> {
             (line_0.saturating_add(1), fraction)
         };
 
-        // Capture Vim mode label before storing editor back
+        // Capture Vim state before storing the editor back. Effects are drained
+        // here so each is delivered to the app exactly once.
         let vim_mode_label = editor.vim_mode().map(|m| m.label());
+        let vim_effects = editor.take_vim_effects();
+        let vim_pending = editor.vim_pending();
+        let vim_cmdline = editor.vim_cmdline();
 
         // Store the editor back
         ui.ctx().data_mut(|data| {
@@ -915,6 +925,9 @@ impl<'a> EditorWidget<'a> {
             viewport_height: viewport_height_val,
             content_height: content_height_val,
             vim_mode_label,
+            vim_effects,
+            vim_pending,
+            vim_cmdline,
         }
     }
 }

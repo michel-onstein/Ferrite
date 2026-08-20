@@ -69,7 +69,7 @@
 | [Syntax Highlighting](./technical/editor/syntax-highlighting.md) | Syntect integration for code block highlighting |
 | [Auto-close Brackets](./technical/editor/auto-close-brackets.md) | Auto-pair insertion, selection wrapping, skip-over behavior for brackets/quotes |
 | [Bracket Matching](./technical/editor/bracket-matching.md) | Highlight matching brackets and parentheses |
-| [Vim Mode](./technical/editor/vim-mode.md) | Optional modal editing with Normal/Insert/Visual modes, Vim keybindings |
+| [Vim Mode](./technical/editor/vim-mode.md) | Modal editing: operator-motion grammar, text objects, registers, dot-repeat, `:` commands |
 | [Windows IME layer transform](./technical/editor/windows-ime-layer-transform.md) | IMEOutput in screen space via layer TSTransform (candidate box alignment) |
 | [Word Wrap Scroll Fixes](./technical/editor/word-wrap-scroll-fixes.md) | Correctness fixes for pixel_to_line, line_to_pixel, scroll sync when word wrap active |
 | [Word Wrap Performance](./technical/editor/word-wrap-performance.md) | Incremental height cache, O(1) LRU, O(log N) visual row mapping |
@@ -319,6 +319,7 @@
 | **[Mermaid Crate Plan](./mermaid-crate-plan.md)** | **Extract Mermaid renderer as standalone pure-Rust crate** |
 | **[Math Support Plan](./math-support-plan.md)** | **v0.4.0 planning: Native LaTeX/TeX math rendering (pure Rust)** |
 | **[PDF Export Pipeline](./technical/planning/pdf-export-pipeline.md)** | **v0.3.x decision doc: native-Rust PDF export via `krilla` + `krilla-svg`, browser fallback retained** |
+| **[Vim Mode Design](./VIM_MODE_DESIGN.md)** | **Implemented (phases 0-4): stroke/parser pipeline for the vi keymap plus an ex command subset** |
 
 ### Performance
 

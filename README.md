@@ -148,6 +148,7 @@ This transparency is intentional — I want others to learn from (and improve up
 - **Code Folding** - Fold/unfold regions with gutter indicators (▶/▼) for headings, code blocks, and lists; collapsed content is hidden
 - **Semantic Minimap** - Navigation panel with clickable header labels, content type indicators, and text density bars (switchable to VS Code-style pixel view)
 - **Multi-Cursor Editing** - Ctrl+Click to add multiple cursors; type, delete, and navigate at all positions simultaneously
+- **Vim Mode** - Optional modal editing (off by default): the operator-motion grammar (`d2w`, `>3j`, `3dd`), text objects (`ci"`, `dap`, `diw`), registers (`"ayy`), `.` repeat, `u`/`Ctrl+R`, and a `:` command line (`:w`, `:q`, `:%s/old/new/g`, `:set number`). Not vimscript
 - **Bracket Matching** - Highlight matching brackets `()[]{}<>` and emphasis pairs `**` `__`
 - **Auto-close Brackets & Quotes** - Type `(`, `[`, `{`, `"`, or `'` to get matching pair; selection wrapping supported
 - **Duplicate Line (Ctrl+Shift+D)** - Duplicate current line or selection
