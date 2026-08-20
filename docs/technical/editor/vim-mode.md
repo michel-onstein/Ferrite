@@ -68,7 +68,7 @@ In `FerriteEditor::ui()`, when `vim_mode_enabled` is true:
 | `←`/`↓`/`↑`/`→` | Aliases for `h`/`j`/`k`/`l` (no line wrapping, matching Vim's default `whichwrap`) |
 | `w`/`b` | Word forward/backward |
 | `0`/`Home` | Line start |
-| `$`/`End` | Line end |
+| `End` | Line end (`$` itself is **not** bound — `egui::Key` has no `$` variant) |
 | `PageUp`/`PageDown` | Move a page (delegated to the standard input handler) |
 | `G` | Last line |
 | `i`/`a` | Insert before/after cursor |
@@ -78,7 +78,6 @@ In `FerriteEditor::ui()`, when `vim_mode_enabled` is true:
 | `dd` | Delete line |
 | `yy` | Yank line |
 | `D` | Delete to end of line |
-| `C` | Change to end of line |
 | `p`/`P` | Paste after/before |
 | `v`/`V` | Enter Visual/Visual Line mode |
 | `{count}{motion}` | Repeat count (e.g., `3j` or `3↓` = move down 3) |
@@ -88,8 +87,19 @@ In `FerriteEditor::ui()`, when `vim_mode_enabled` is true:
 Documented here so the gaps aren't rediscovered as bugs:
 
 - `e` (word end), `gg` (file start), `f`/`t` (find char), `%` (matching bracket)
+- `C` (change to end of line) — `Key::C` has no shift branch, so `C` sets a pending
+  *change operator* instead of changing to end of line.
+- `$`, `^`, `%`, `*`, `~`, `>`, `<` — `egui::Key` has no variant for these characters, and
+  `Event::Text` is discarded in Normal/Visual mode, so they cannot be bound at all without
+  the restructuring in [`docs/VIM_MODE_DESIGN.md`](../../VIM_MODE_DESIGN.md).
+- Text objects (`ci"`, `dap`), registers (`"ayy`), and `.` repeat — the single
+  `Option<PendingOperator>` state cannot represent them.
 - `u` / `Ctrl+R` — `u` is currently swallowed in Normal mode; undo/redo is not wired
   into `VimState`, which only receives the buffer, selection, and view (not `EditHistory`).
+  Vim-mode edits therefore also bypass the undo history.
+
+> A design for lifting these limits — a keystroke/parser pipeline plus an ex command
+> subset — is in [`docs/VIM_MODE_DESIGN.md`](../../VIM_MODE_DESIGN.md) (Status: Proposed).
 
 ### Visual/Visual Line Mode
 
