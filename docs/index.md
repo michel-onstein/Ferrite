@@ -319,6 +319,7 @@
 | **[Mermaid Crate Plan](./mermaid-crate-plan.md)** | **Extract Mermaid renderer as standalone pure-Rust crate** |
 | **[Math Support Plan](./math-support-plan.md)** | **v0.4.0 planning: Native LaTeX/TeX math rendering (pure Rust)** |
 | **[PDF Export Pipeline](./technical/planning/pdf-export-pipeline.md)** | **v0.3.x decision doc: native-Rust PDF export via `krilla` + `krilla-svg`, browser fallback retained** |
+| **[Vim Mode Design](./VIM_MODE_DESIGN.md)** | **Proposed: stroke/parser pipeline for a fuller vi keymap plus an ex command subset** |
 
 ### Performance
 
