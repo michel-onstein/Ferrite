@@ -1858,6 +1858,15 @@ impl FerriteEditor {
         let primary_cursor = self.primary_selection().head;
         let mut cursor_rect_for_ime: Option<egui::Rect> = None;
 
+        // Vim Normal/Visual mode sits *on* a character, so the cursor covers it;
+        // Insert mode sits *between* characters and draws a bar. Computed once
+        // per frame rather than per cursor.
+        let cursor_shape = if self.vim_mode_enabled && self.vim_state.mode.uses_block_cursor() {
+            cursor_render::CursorShape::Block
+        } else {
+            cursor_render::CursorShape::Bar
+        };
+
         for (idx, sel) in self.selections.iter().enumerate() {
             let cursor = sel.head;
             if cursor.line >= start_line && cursor.line < end_line {
@@ -1875,6 +1884,7 @@ impl FerriteEditor {
                     effective_wrap_width,
                     cursor_color,
                     self.cursor_visible,
+                    cursor_shape,
                 );
 
                 // Calculate cursor position for IME (use primary cursor only)

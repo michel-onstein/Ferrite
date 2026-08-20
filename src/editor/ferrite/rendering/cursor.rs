@@ -31,6 +31,53 @@ use super::super::view::ViewState;
 /// Standard is ~500ms, giving a full on/off cycle of ~1 second.
 pub const CURSOR_BLINK_INTERVAL_MS: u64 = 500;
 
+/// Width of the insertion-point cursor, in pixels.
+const BAR_WIDTH: f32 = 2.0;
+
+/// Fallback block width when there is no character to measure (end of line,
+/// empty line). A rough en-width for the font size.
+const EMPTY_BLOCK_WIDTH_RATIO: f32 = 0.5;
+
+/// How the cursor is drawn.
+///
+/// Vim mode makes this visible state: Normal and Visual mode sit *on* a
+/// character, so the cursor covers it, whereas Insert mode sits *between*
+/// characters and draws a thin bar. Without the distinction there is no way to
+/// tell the modes apart while typing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CursorShape {
+    /// A thin vertical line between characters — insertion point.
+    #[default]
+    Bar,
+    /// A filled block covering the character under the cursor.
+    Block,
+}
+
+/// Picks a legible text colour to draw over a filled block.
+///
+/// The block is painted in the cursor colour, so the glyph beneath it has to be
+/// repainted in something that contrasts, or the character under the cursor
+/// becomes invisible.
+fn contrasting_text_color(background: Color32) -> Color32 {
+    // Rec. 601 luma, which is good enough for a light/dark decision.
+    let [r, g, b, _] = background.to_array();
+    let luma = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
+    if luma > 140.0 {
+        Color32::from_rgb(20, 20, 20)
+    } else {
+        Color32::from_rgb(240, 240, 240)
+    }
+}
+
+/// The character under the cursor, if any. `None` at end of line, where a block
+/// cursor has nothing to cover.
+fn char_under_cursor(buffer: &TextBuffer, cursor: &Cursor) -> Option<char> {
+    let line = buffer.get_line(cursor.line)?;
+    line.trim_end_matches(['\r', '\n'])
+        .chars()
+        .nth(cursor.column)
+}
+
 /// Renders the cursor at its current position.
 ///
 /// Handles both wrapped and non-wrapped text modes. For wrapped text, correctly
@@ -47,6 +94,8 @@ pub const CURSOR_BLINK_INTERVAL_MS: u64 = 500;
 /// * `wrap_width` - Width at which text wraps (ignored if wrap disabled)
 /// * `cursor_color` - Color for the cursor (should match theme)
 /// * `cursor_visible` - Whether the cursor should be drawn (for blink effect)
+/// * `shape` - Bar (insertion point) or Block (Vim Normal/Visual mode)
+#[allow(clippy::too_many_arguments)]
 pub fn render_cursor(
     painter: &egui::Painter,
     buffer: &TextBuffer,
@@ -58,6 +107,7 @@ pub fn render_cursor(
     wrap_width: f32,
     cursor_color: Color32,
     cursor_visible: bool,
+    shape: CursorShape,
 ) {
     // Skip rendering if cursor is in hidden phase of blink cycle
     if !cursor_visible {
@@ -87,11 +137,48 @@ pub fn render_cursor(
         )
     };
 
-    // Draw cursor as a thin vertical line
-    let cursor_rect =
-        Rect::from_min_size(Pos2::new(cursor_x, cursor_y), Vec2::new(2.0, cursor_height));
+    match shape {
+        CursorShape::Bar => {
+            let cursor_rect = Rect::from_min_size(
+                Pos2::new(cursor_x, cursor_y),
+                Vec2::new(BAR_WIDTH, cursor_height),
+            );
+            painter.rect_filled(cursor_rect, 0.0, cursor_color);
+        }
+        CursorShape::Block => {
+            let glyph = char_under_cursor(buffer, cursor);
 
-    painter.rect_filled(cursor_rect, 0.0, cursor_color);
+            // The block spans the character it sits on, so it lines up with the
+            // text rather than being a fixed width.
+            let width = match glyph {
+                Some(c) => {
+                    let galley =
+                        painter.layout_no_wrap(c.to_string(), font_id.clone(), Color32::WHITE);
+                    // Zero-width glyphs (combining marks) would give an
+                    // invisible cursor.
+                    galley.size().x.max(font_id.size * EMPTY_BLOCK_WIDTH_RATIO)
+                }
+                None => font_id.size * EMPTY_BLOCK_WIDTH_RATIO,
+            };
+
+            let cursor_rect = Rect::from_min_size(
+                Pos2::new(cursor_x, cursor_y),
+                Vec2::new(width, cursor_height),
+            );
+            painter.rect_filled(cursor_rect, 0.0, cursor_color);
+
+            // Repaint the covered glyph so the character stays readable.
+            if let Some(c) = glyph {
+                painter.text(
+                    Pos2::new(cursor_x, cursor_y),
+                    egui::Align2::LEFT_TOP,
+                    c,
+                    font_id.clone(),
+                    contrasting_text_color(cursor_color),
+                );
+            }
+        }
+    }
 }
 
 /// Calculates cursor position for non-wrapped text.
@@ -251,5 +338,71 @@ pub fn get_cursor_position(
             text_start_x,
             line_top_y,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_bar_is_the_default_shape() {
+        // Non-Vim editing must be unaffected by the block cursor work.
+        assert_eq!(CursorShape::default(), CursorShape::Bar);
+    }
+
+    #[test]
+    fn a_light_cursor_gets_dark_text_and_a_dark_cursor_gets_light_text() {
+        // The block is painted in the cursor colour, so the glyph under it has
+        // to be repainted in something legible or it disappears.
+        let on_white = contrasting_text_color(Color32::WHITE);
+        let on_black = contrasting_text_color(Color32::BLACK);
+        assert_eq!(on_white, Color32::from_rgb(20, 20, 20));
+        assert_eq!(on_black, Color32::from_rgb(240, 240, 240));
+        assert_ne!(on_white, on_black);
+    }
+
+    #[test]
+    fn contrast_follows_luma_not_a_single_channel() {
+        // Pure green is bright to the eye despite a zero red channel.
+        assert_eq!(
+            contrasting_text_color(Color32::from_rgb(0, 255, 0)),
+            Color32::from_rgb(20, 20, 20)
+        );
+        // Pure blue is dark.
+        assert_eq!(
+            contrasting_text_color(Color32::from_rgb(0, 0, 255)),
+            Color32::from_rgb(240, 240, 240)
+        );
+    }
+
+    #[test]
+    fn the_character_under_the_cursor_is_found() {
+        let buffer = TextBuffer::from_string("abc\ndef");
+        assert_eq!(char_under_cursor(&buffer, &Cursor::new(0, 0)), Some('a'));
+        assert_eq!(char_under_cursor(&buffer, &Cursor::new(0, 2)), Some('c'));
+        assert_eq!(char_under_cursor(&buffer, &Cursor::new(1, 1)), Some('e'));
+    }
+
+    #[test]
+    fn there_is_no_character_at_the_end_of_a_line() {
+        // A block cursor past the last character has nothing to cover, so it
+        // falls back to a fixed width rather than measuring nothing.
+        let buffer = TextBuffer::from_string("ab\n");
+        assert_eq!(char_under_cursor(&buffer, &Cursor::new(0, 2)), None);
+        assert_eq!(char_under_cursor(&buffer, &Cursor::new(1, 0)), None);
+    }
+
+    #[test]
+    fn the_newline_is_never_reported_as_the_character_under_the_cursor() {
+        // Otherwise the block would render a stray glyph at end of line.
+        let buffer = TextBuffer::from_string("ab\r\ncd");
+        assert_eq!(char_under_cursor(&buffer, &Cursor::new(0, 2)), None);
+    }
+
+    #[test]
+    fn a_missing_line_is_handled() {
+        let buffer = TextBuffer::from_string("a");
+        assert_eq!(char_under_cursor(&buffer, &Cursor::new(99, 0)), None);
     }
 }

@@ -70,6 +70,15 @@ impl VimMode {
             _ => ParseMode::Normal,
         }
     }
+
+    /// Whether the cursor should be drawn as a block covering the character it
+    /// sits on, rather than as a bar between characters.
+    ///
+    /// Every mode except Insert operates *on* the character under the cursor, so
+    /// the cursor covers it — that is what makes the mode visible at a glance.
+    pub fn uses_block_cursor(self) -> bool {
+        self != VimMode::Insert
+    }
 }
 
 /// Something only the application can carry out.
@@ -1516,6 +1525,48 @@ mod tests {
             v.key(key);
             assert_eq!(v.cursor(), want, "{key:?}");
         }
+    }
+
+    // ── cursor shape ─────────────────────────────────────────────────────
+
+    #[test]
+    fn normal_and_visual_modes_use_a_block_cursor_and_insert_uses_a_bar() {
+        assert!(VimMode::Normal.uses_block_cursor());
+        assert!(VimMode::Visual.uses_block_cursor());
+        assert!(VimMode::VisualLine.uses_block_cursor());
+        assert!(VimMode::CommandLine.uses_block_cursor());
+        assert!(
+            !VimMode::Insert.uses_block_cursor(),
+            "Insert sits between characters, so it draws a bar"
+        );
+    }
+
+    #[test]
+    fn the_cursor_shape_follows_the_mode_as_the_user_switches() {
+        let mut v = Vim::new("hello", 0, 0);
+        assert!(v.state.mode.uses_block_cursor(), "starts in Normal");
+
+        v.keys("i");
+        assert!(!v.state.mode.uses_block_cursor(), "i → bar");
+
+        v.esc();
+        assert!(v.state.mode.uses_block_cursor(), "Esc → block");
+
+        v.keys("v");
+        assert!(v.state.mode.uses_block_cursor(), "visual → block");
+
+        v.esc();
+        v.keys("A");
+        assert!(!v.state.mode.uses_block_cursor(), "A → bar");
+    }
+
+    #[test]
+    fn a_change_operator_leaves_the_cursor_as_a_bar() {
+        // `ci"` ends in Insert mode, so the shape must follow.
+        let mut v = Vim::new("x = \"old\"", 0, 6);
+        v.keys("ci\"");
+        assert_eq!(v.state.mode, VimMode::Insert);
+        assert!(!v.state.mode.uses_block_cursor());
     }
 
     #[test]

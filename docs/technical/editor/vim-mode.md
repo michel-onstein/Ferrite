@@ -21,7 +21,8 @@ This document is the as-built reference.
   - `ex.rs` — `:` command parsing
   - `mod.rs` — `VimState`, the mode machine, dot-repeat, `VimEffect`
 - `src/app/vim_effects.rs` — carries out app-level effects (save, quit, undo, search, `:set`)
-- `src/editor/ferrite/editor.rs` — event interception
+- `src/editor/ferrite/editor.rs` — event interception, cursor-shape selection
+- `src/editor/ferrite/rendering/cursor.rs` — `CursorShape::Bar` / `Block` rendering
 - `src/editor/widget.rs` — `vim_mode` builder; `vim_effects` / `vim_pending` / `vim_cmdline`
   on `EditorOutput`
 - `src/app/central_panel.rs` — collects effects, applies them after the tab borrow ends
@@ -63,6 +64,21 @@ grammar does not claim returns `Passthrough` and reaches the standard input hand
 what keeps app shortcuts alive in Normal mode, and it replaces the old `_ => Consumed`
 catch-all that silently swallowed every unbound key — the cause of the dead arrow keys in
 v0.3.0.
+
+### Cursor shape follows the mode
+
+Normal, Visual, Visual Line and Command-Line modes draw a **block** covering the character
+under the cursor; Insert mode draws the usual **thin bar** between characters. That is the
+distinction Vim users read to tell which mode they are in without looking at the status bar.
+
+The block is painted in the cursor colour and the covered glyph is repainted in a contrasting
+colour (chosen by Rec. 601 luma), so the character stays readable underneath. Its width is
+the advance width of that character, so it lines up with proportional and CJK text; at end of
+line, where there is nothing to cover, it falls back to half the font size.
+
+`CursorShape` lives in `rendering/cursor.rs` and the decision is
+`VimMode::uses_block_cursor()`. With Vim mode off, the cursor is always a bar — non-modal
+editing is unaffected.
 
 ### Ctrl chords are left to the application
 
