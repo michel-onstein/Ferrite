@@ -548,6 +548,18 @@ impl FerriteApp {
                                 .size(12.0),
                         )
                         .on_hover_text(t!("status.vim_mode").to_string());
+
+                        // The open `:`/`/` command line, or a partially typed
+                        // command such as `d2`. Without this the user has no way
+                        // to see what they have typed so far.
+                        if let Some(detail) = self.state.ui.vim_command_line.as_deref() {
+                            ui.label(
+                                egui::RichText::new(detail)
+                                    .color(vim_color)
+                                    .monospace()
+                                    .size(12.0),
+                            );
+                        }
                     }
 
                     if let Some(tab) = self.state.active_tab() {

@@ -27,6 +27,7 @@ mod platform;
 mod status_bar;
 mod title_bar;
 mod types;
+mod vim_effects;
 
 use crate::config::{apply_snippet, find_trigger_at_cursor, SnippetManager, ViewMode, WindowSize};
 use crate::editor::{cleanup_ferrite_editor, DocumentOutline, DocumentStats, FindReplacePanel};

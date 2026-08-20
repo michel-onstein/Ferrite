@@ -89,7 +89,8 @@ pub enum Motion {
     ScreenTop,
     ScreenMiddle,
     ScreenBottom,
-    /// `Ctrl+D` / `Ctrl+U` / `Ctrl+F` / `Ctrl+B`, and the PageUp/PageDown keys.
+    /// The PageUp/PageDown keys. Vim's Ctrl+D/U/F/B chords are deliberately not
+    /// bound — see the note in `parse_motion`.
     Scroll {
         down: bool,
         half: bool,
@@ -398,16 +399,10 @@ fn parse_motion(strokes: &[Stroke], i: usize) -> MotionParse {
             'g' => {
                 return match strokes.get(i + 1) {
                     None => MotionParse::Incomplete,
-                    Some(Stroke::Char('g')) => {
-                        MotionParse::Got(Motion::GotoLine { first: true })
-                    }
+                    Some(Stroke::Char('g')) => MotionParse::Got(Motion::GotoLine { first: true }),
                     Some(Stroke::Char('_')) => MotionParse::Got(Motion::LastNonBlank),
-                    Some(Stroke::Char('e')) => {
-                        MotionParse::Got(Motion::WordEndBack { big: false })
-                    }
-                    Some(Stroke::Char('E')) => {
-                        MotionParse::Got(Motion::WordEndBack { big: true })
-                    }
+                    Some(Stroke::Char('e')) => MotionParse::Got(Motion::WordEndBack { big: false }),
+                    Some(Stroke::Char('E')) => MotionParse::Got(Motion::WordEndBack { big: true }),
                     Some(_) => MotionParse::No,
                 };
             }
