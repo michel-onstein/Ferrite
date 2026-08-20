@@ -1519,6 +1519,45 @@ mod tests {
     }
 
     #[test]
+    fn arrow_keys_pass_through_in_insert_mode() {
+        // In Insert mode the arrows belong to the standard editor, which is
+        // grapheme-aware; Vim must not intercept them.
+        let mut v = Vim::new("hello", 0, 0);
+        v.keys("i");
+        assert_eq!(v.state.mode, VimMode::Insert);
+
+        for key in [
+            Key::ArrowLeft,
+            Key::ArrowRight,
+            Key::ArrowUp,
+            Key::ArrowDown,
+            Key::Home,
+            Key::End,
+            Key::PageUp,
+            Key::PageDown,
+        ] {
+            let mut ctx = VimCtx {
+                buffer: &mut v.buffer,
+                selections: &mut v.selections,
+                primary: 0,
+                view: &mut v.view,
+                visible_lines: 10,
+            };
+            let got = v.state.handle_key(key, &Modifiers::NONE, &mut ctx);
+            assert_eq!(got, VimKeyResult::Passthrough, "{key:?} in Insert mode");
+        }
+    }
+
+    #[test]
+    fn home_and_end_act_as_zero_and_dollar_in_normal_mode() {
+        let mut v = Vim::new("    hello world", 0, 7);
+        v.key(Key::Home);
+        assert_eq!(v.cursor(), (0, 0));
+        v.key(Key::End);
+        assert_eq!(v.cursor(), (0, 15));
+    }
+
+    #[test]
     fn arrow_keys_extend_the_selection_in_visual_mode() {
         let mut v = Vim::new("hello\nworld", 0, 2);
         v.keys("v");
