@@ -51,6 +51,13 @@ In `FerriteEditor::ui()`, when `vim_mode_enabled` is true:
 3. `Event::Text` events are suppressed in Normal/Visual modes via `should_insert_text()`.
 4. Standard egui shortcuts (Ctrl+C, Ctrl+V, etc.) are not intercepted by Vim.
 
+> **Careful with the catch-all.** Normal and Visual mode both end in
+> `_ => VimKeyResult::Consumed`, which silently swallows every key without an
+> explicit arm — the key reaches neither Vim nor the standard input handler. That
+> is what made the arrow keys dead in Normal mode until v0.3.1.
+> A key that should keep its standard behaviour needs an explicit
+> `VimKeyResult::Passthrough` arm.
+
 ## Implemented Commands
 
 ### Normal Mode
@@ -58,9 +65,12 @@ In `FerriteEditor::ui()`, when `vim_mode_enabled` is true:
 | Key | Action |
 |-----|--------|
 | `h`/`j`/`k`/`l` | Left/down/up/right movement |
-| `w`/`b`/`e` | Word forward/backward/end |
-| `0`/`$` | Line start/end |
-| `gg`/`G` | File start/end |
+| `←`/`↓`/`↑`/`→` | Aliases for `h`/`j`/`k`/`l` (no line wrapping, matching Vim's default `whichwrap`) |
+| `w`/`b` | Word forward/backward |
+| `0`/`Home` | Line start |
+| `$`/`End` | Line end |
+| `PageUp`/`PageDown` | Move a page (delegated to the standard input handler) |
+| `G` | Last line |
 | `i`/`a` | Insert before/after cursor |
 | `I`/`A` | Insert at line start/end |
 | `o`/`O` | Open line below/above |
@@ -71,15 +81,22 @@ In `FerriteEditor::ui()`, when `vim_mode_enabled` is true:
 | `C` | Change to end of line |
 | `p`/`P` | Paste after/before |
 | `v`/`V` | Enter Visual/Visual Line mode |
-| `u` | Undo |
-| `Ctrl+R` | Redo |
-| `{count}{motion}` | Repeat count (e.g., `3j` = move down 3) |
+| `{count}{motion}` | Repeat count (e.g., `3j` or `3↓` = move down 3) |
+
+### Not yet implemented
+
+Documented here so the gaps aren't rediscovered as bugs:
+
+- `e` (word end), `gg` (file start), `f`/`t` (find char), `%` (matching bracket)
+- `u` / `Ctrl+R` — `u` is currently swallowed in Normal mode; undo/redo is not wired
+  into `VimState`, which only receives the buffer, selection, and view (not `EditHistory`).
 
 ### Visual/Visual Line Mode
 
 | Key | Action |
 |-----|--------|
-| Motions | Extend selection |
+| Motions (`hjkl` or arrow keys) | Extend selection |
+| `Home`/`End` | Extend selection to line start/end |
 | `d` | Delete selection |
 | `y` | Yank selection |
 | `Esc` | Return to Normal |

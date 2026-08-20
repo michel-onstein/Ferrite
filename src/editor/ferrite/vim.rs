@@ -239,43 +239,25 @@ impl VimState {
             }
 
             // ── Motion keys ──────────────────────────────────────────────
-            Key::H => {
-                for _ in 0..count {
-                    if selection.head.column > 0 {
-                        selection.head.column -= 1;
-                    }
-                }
+            // The arrow keys are aliases for hjkl. Like Vim's default
+            // `whichwrap`, they move within the line without wrapping.
+            Key::H | Key::ArrowLeft => {
+                motion_left(&mut selection.head, count);
                 *selection = Selection::collapsed(selection.head);
                 VimKeyResult::Handled(InputResult::CursorMoved)
             }
-            Key::J => {
-                let last_line = buffer.line_count().saturating_sub(1);
-                for _ in 0..count {
-                    if selection.head.line < last_line {
-                        selection.head.line += 1;
-                    }
-                }
-                clamp_column(buffer, &mut selection.head);
+            Key::J | Key::ArrowDown => {
+                motion_down(buffer, &mut selection.head, count);
                 *selection = Selection::collapsed(selection.head);
                 VimKeyResult::Handled(InputResult::CursorMoved)
             }
-            Key::K => {
-                for _ in 0..count {
-                    if selection.head.line > 0 {
-                        selection.head.line -= 1;
-                    }
-                }
-                clamp_column(buffer, &mut selection.head);
+            Key::K | Key::ArrowUp => {
+                motion_up(buffer, &mut selection.head, count);
                 *selection = Selection::collapsed(selection.head);
                 VimKeyResult::Handled(InputResult::CursorMoved)
             }
-            Key::L => {
-                let line_len = InputHandler::line_length(buffer, selection.head.line);
-                for _ in 0..count {
-                    if selection.head.column < line_len {
-                        selection.head.column += 1;
-                    }
-                }
+            Key::L | Key::ArrowRight => {
+                motion_right(buffer, &mut selection.head, count);
                 *selection = Selection::collapsed(selection.head);
                 VimKeyResult::Handled(InputResult::CursorMoved)
             }
@@ -296,8 +278,8 @@ impl VimState {
                 VimKeyResult::Handled(InputResult::CursorMoved)
             }
 
-            // 0 → beginning of line (only when no repeat count pending)
-            Key::Num0 => {
+            // 0 / Home → beginning of line (only when no repeat count pending)
+            Key::Num0 | Key::Home => {
                 selection.head.column = 0;
                 *selection = Selection::collapsed(selection.head);
                 VimKeyResult::Handled(InputResult::CursorMoved)
@@ -414,6 +396,10 @@ impl VimState {
                 VimKeyResult::Consumed
             }
 
+            // Page motions have no Normal-mode binding of their own; let the
+            // standard input handler move the cursor by a page.
+            Key::PageUp | Key::PageDown => VimKeyResult::Passthrough,
+
             _ => VimKeyResult::Consumed,
         }
     }
@@ -487,42 +473,45 @@ impl VimState {
                 *selection = Selection::collapsed(selection.head);
                 VimKeyResult::Consumed
             }
-            // Motion extends selection
-            Key::H => {
-                if selection.head.column > 0 {
-                    selection.head.column -= 1;
-                }
+            // Motion extends selection (arrow keys alias hjkl here too)
+            Key::H | Key::ArrowLeft => {
+                motion_left(&mut selection.head, 1);
                 if self.mode == VimMode::VisualLine {
                     expand_to_full_lines(buffer, selection);
                 }
                 VimKeyResult::Handled(InputResult::CursorMoved)
             }
-            Key::J => {
-                let last_line = buffer.line_count().saturating_sub(1);
-                if selection.head.line < last_line {
-                    selection.head.line += 1;
-                    clamp_column(buffer, &mut selection.head);
-                }
+            Key::J | Key::ArrowDown => {
+                motion_down(buffer, &mut selection.head, 1);
                 if self.mode == VimMode::VisualLine {
                     expand_to_full_lines(buffer, selection);
                 }
                 VimKeyResult::Handled(InputResult::CursorMoved)
             }
-            Key::K => {
-                if selection.head.line > 0 {
-                    selection.head.line -= 1;
-                    clamp_column(buffer, &mut selection.head);
-                }
+            Key::K | Key::ArrowUp => {
+                motion_up(buffer, &mut selection.head, 1);
                 if self.mode == VimMode::VisualLine {
                     expand_to_full_lines(buffer, selection);
                 }
                 VimKeyResult::Handled(InputResult::CursorMoved)
             }
-            Key::L => {
-                let line_len = InputHandler::line_length(buffer, selection.head.line);
-                if selection.head.column < line_len {
-                    selection.head.column += 1;
+            Key::L | Key::ArrowRight => {
+                motion_right(buffer, &mut selection.head, 1);
+                if self.mode == VimMode::VisualLine {
+                    expand_to_full_lines(buffer, selection);
                 }
+                VimKeyResult::Handled(InputResult::CursorMoved)
+            }
+            // Home / End extend the selection to the line bounds.
+            Key::Home => {
+                selection.head.column = 0;
+                if self.mode == VimMode::VisualLine {
+                    expand_to_full_lines(buffer, selection);
+                }
+                VimKeyResult::Handled(InputResult::CursorMoved)
+            }
+            Key::End => {
+                selection.head.column = InputHandler::line_length(buffer, selection.head.line);
                 if self.mode == VimMode::VisualLine {
                     expand_to_full_lines(buffer, selection);
                 }
@@ -753,6 +742,34 @@ fn key_to_digit(key: Key) -> Option<usize> {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared motions — used by both hjkl and the arrow keys
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// `h` / Left: move `count` columns left, stopping at the line start.
+fn motion_left(cursor: &mut Cursor, count: usize) {
+    cursor.column = cursor.column.saturating_sub(count);
+}
+
+/// `l` / Right: move `count` columns right, stopping at the line end.
+fn motion_right(buffer: &TextBuffer, cursor: &mut Cursor, count: usize) {
+    let line_len = InputHandler::line_length(buffer, cursor.line);
+    cursor.column = (cursor.column + count).min(line_len);
+}
+
+/// `k` / Up: move `count` lines up, clamping the column to the new line.
+fn motion_up(buffer: &TextBuffer, cursor: &mut Cursor, count: usize) {
+    cursor.line = cursor.line.saturating_sub(count);
+    clamp_column(buffer, cursor);
+}
+
+/// `j` / Down: move `count` lines down, clamping the column to the new line.
+fn motion_down(buffer: &TextBuffer, cursor: &mut Cursor, count: usize) {
+    let last_line = buffer.line_count().saturating_sub(1);
+    cursor.line = (cursor.line + count).min(last_line);
+    clamp_column(buffer, cursor);
+}
+
 fn clamp_column(buffer: &TextBuffer, cursor: &mut Cursor) {
     let line_len = InputHandler::line_length(buffer, cursor.line);
     if cursor.column > line_len {
@@ -839,4 +856,180 @@ fn expand_to_full_lines(buffer: &TextBuffer, selection: &mut Selection) {
             column: start_col,
         }
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egui::Modifiers;
+
+    /// Drives a key through `VimState`, returning the result and the cursor.
+    fn press(
+        state: &mut VimState,
+        buffer: &mut TextBuffer,
+        sel: &mut Selection,
+        key: Key,
+    ) -> VimKeyResult {
+        let mut view = ViewState::new();
+        state.handle_key(key, &Modifiers::NONE, buffer, sel, &mut view)
+    }
+
+    fn buffer() -> TextBuffer {
+        TextBuffer::from_string("Hello world\nSecond line\nThird")
+    }
+
+    fn at(line: usize, column: usize) -> Selection {
+        Selection::collapsed(Cursor::new(line, column))
+    }
+
+    /// Regression: in Normal mode the arrow keys hit the catch-all arm and were
+    /// silently consumed, so only hjkl could navigate.
+    #[test]
+    fn arrow_keys_move_the_cursor_in_normal_mode() {
+        let cases = [
+            (Key::ArrowLeft, (1, 3)),
+            (Key::ArrowRight, (1, 5)),
+            (Key::ArrowUp, (0, 4)),
+            (Key::ArrowDown, (2, 4)),
+        ];
+
+        for (key, (line, column)) in cases {
+            let mut state = VimState::new();
+            let mut buf = buffer();
+            let mut sel = at(1, 4);
+
+            let result = press(&mut state, &mut buf, &mut sel, key);
+
+            assert!(
+                matches!(result, VimKeyResult::Handled(InputResult::CursorMoved)),
+                "{key:?} should be handled as a cursor motion"
+            );
+            assert_eq!((sel.head.line, sel.head.column), (line, column), "{key:?}");
+            assert!(sel.is_collapsed(), "{key:?} should not create a selection");
+        }
+    }
+
+    #[test]
+    fn arrow_keys_match_hjkl_in_normal_mode() {
+        for (arrow, letter) in [
+            (Key::ArrowLeft, Key::H),
+            (Key::ArrowDown, Key::J),
+            (Key::ArrowUp, Key::K),
+            (Key::ArrowRight, Key::L),
+        ] {
+            let mut arrow_buf = buffer();
+            let mut arrow_sel = at(1, 4);
+            press(&mut VimState::new(), &mut arrow_buf, &mut arrow_sel, arrow);
+
+            let mut letter_buf = buffer();
+            let mut letter_sel = at(1, 4);
+            press(
+                &mut VimState::new(),
+                &mut letter_buf,
+                &mut letter_sel,
+                letter,
+            );
+
+            assert_eq!(arrow_sel.head, letter_sel.head, "{arrow:?} vs {letter:?}");
+        }
+    }
+
+    #[test]
+    fn arrow_keys_honour_the_repeat_count() {
+        let mut state = VimState::new();
+        let mut buf = buffer();
+        let mut sel = at(0, 0);
+
+        press(&mut state, &mut buf, &mut sel, Key::Num2);
+        press(&mut state, &mut buf, &mut sel, Key::ArrowDown);
+
+        assert_eq!(sel.head.line, 2);
+    }
+
+    #[test]
+    fn arrow_left_stops_at_the_line_start() {
+        let mut state = VimState::new();
+        let mut buf = buffer();
+        let mut sel = at(1, 0);
+
+        press(&mut state, &mut buf, &mut sel, Key::ArrowLeft);
+
+        assert_eq!((sel.head.line, sel.head.column), (1, 0));
+    }
+
+    #[test]
+    fn arrow_down_clamps_the_column_to_a_shorter_line() {
+        let mut state = VimState::new();
+        let mut buf = buffer();
+        let mut sel = at(1, 10);
+
+        press(&mut state, &mut buf, &mut sel, Key::ArrowDown);
+
+        // "Third" is 5 characters long.
+        assert_eq!((sel.head.line, sel.head.column), (2, 5));
+    }
+
+    #[test]
+    fn home_moves_to_the_line_start_in_normal_mode() {
+        let mut state = VimState::new();
+        let mut buf = buffer();
+        let mut sel = at(1, 6);
+
+        let result = press(&mut state, &mut buf, &mut sel, Key::Home);
+
+        assert!(matches!(
+            result,
+            VimKeyResult::Handled(InputResult::CursorMoved)
+        ));
+        assert_eq!(sel.head.column, 0);
+    }
+
+    #[test]
+    fn arrow_keys_extend_the_selection_in_visual_mode() {
+        let mut state = VimState::new();
+        let mut buf = buffer();
+        let mut sel = at(0, 2);
+
+        press(&mut state, &mut buf, &mut sel, Key::V);
+        assert_eq!(state.mode, VimMode::Visual);
+
+        press(&mut state, &mut buf, &mut sel, Key::ArrowRight);
+        press(&mut state, &mut buf, &mut sel, Key::ArrowDown);
+
+        assert_eq!(sel.anchor, Cursor::new(0, 2));
+        assert_eq!(sel.head, Cursor::new(1, 3));
+        assert!(sel.is_range());
+    }
+
+    #[test]
+    fn page_keys_pass_through_in_normal_mode() {
+        let mut state = VimState::new();
+        let mut buf = buffer();
+        let mut sel = at(0, 0);
+
+        for key in [Key::PageUp, Key::PageDown] {
+            let result = press(&mut state, &mut buf, &mut sel, key);
+            assert!(matches!(result, VimKeyResult::Passthrough), "{key:?}");
+        }
+    }
+
+    #[test]
+    fn arrow_keys_pass_through_in_insert_mode() {
+        let mut state = VimState::new();
+        let mut buf = buffer();
+        let mut sel = at(0, 0);
+
+        press(&mut state, &mut buf, &mut sel, Key::I);
+        assert_eq!(state.mode, VimMode::Insert);
+
+        for key in [
+            Key::ArrowLeft,
+            Key::ArrowRight,
+            Key::ArrowUp,
+            Key::ArrowDown,
+        ] {
+            let result = press(&mut state, &mut buf, &mut sel, key);
+            assert!(matches!(result, VimKeyResult::Passthrough), "{key:?}");
+        }
+    }
 }
